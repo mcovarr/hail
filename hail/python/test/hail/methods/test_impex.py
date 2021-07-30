@@ -1574,7 +1574,6 @@ class GENTests(unittest.TestCase):
                                resource('skip_invalid_loci.sample'))
             mt._force_count_rows()
 
-
     @fails_service_backend()
     @fails_local_backend()
     def test_export_gen(self):
