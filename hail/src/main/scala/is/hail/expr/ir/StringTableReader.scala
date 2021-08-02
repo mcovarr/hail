@@ -1,14 +1,19 @@
 package is.hail.expr.ir
 import is.hail.annotations.{Region, RegionValueBuilder}
+import is.hail.asm4s.{Code, CodeLabel, Settable, Value}
 import is.hail.expr.TableAnnotationImpex
 import is.hail.expr.ir.StringTableReader.getFileStatuses
-import is.hail.expr.ir.lowering.TableStage
+import is.hail.expr.ir.functions.StringFunctions
+import is.hail.expr.ir.lowering.{TableStage, TableStageDependency}
+import is.hail.expr.ir.streams.StreamProducer
 import is.hail.io.fs.{FS, FileStatus}
 import is.hail.rvd.RVDPartitioner
 import is.hail.types.TableType
+import is.hail.types.physical.stypes.concrete.{SJavaString, SStackStruct}
+import is.hail.types.physical.stypes.interfaces.{SStream, SStreamCode}
 import is.hail.types.physical.{PCanonicalString, PCanonicalStruct, PField, PStruct, PType}
-import is.hail.types.virtual.{Field, TString, TStruct}
-import is.hail.utils.{FastIndexedSeq, fatal}
+import is.hail.types.virtual.{Field, TArray, TString, TStruct, Type}
+import is.hail.utils.{FastIndexedSeq, FastSeq, fatal}
 import org.apache.spark.sql.Row
 import org.json4s.{Formats, JValue}
 
@@ -35,6 +40,74 @@ object StringTableReader {
   }
 }
 
+case class StringTablePartitionReader(lines: GenericLines) extends PartitionReader {
+  def contextType: Type = lines.contextType
+
+  def fullRowType: Type = TStruct("file"-> TString, "text" -> TString)
+
+  def rowPType(requestedType: Type): PType = ??? // going away
+
+  def emitStream(
+    ctx: ExecuteContext,
+    cb: EmitCodeBuilder,
+    context: EmitCode,
+    partitionRegion: Value[Region],
+    requestedType: Type): IEmitCode = {
+
+    context.toI(cb).map(cb) { partitionContext =>
+      val iter = cb.emb.genFieldThisRef[CloseableIterator[GenericLine]]("iter")
+
+      val ctxMemo = partitionContext.asBaseStruct.memoize(cb, "string_table_reader_ctx")
+      val fileName = cb.emb.genFieldThisRef[String]("fileName")
+      val line = cb.emb.genFieldThisRef[String]("line")
+
+      SStreamCode(new StreamProducer {
+        override val length: Option[EmitCodeBuilder => Code[Int]] = None
+
+        override def initialize(cb: EmitCodeBuilder): Unit = {
+          val contextAsJavaValue = StringFunctions.scodeToJavaValue(cb, partitionRegion, ctxMemo)
+
+          cb.assign(fileName, ctxMemo.loadField(cb, "file").get(cb).asString.loadString())
+
+          cb.assign(iter,
+            cb.emb.getObject[Function1[AnyRef, CloseableIterator[GenericLine]]](lines.body)
+              .invoke[AnyRef, CloseableIterator[GenericLine]]("apply", contextAsJavaValue)
+          )
+        }
+
+        override val elementRegion: Settable[Region] = cb.emb.genFieldThisRef[Region]("string_table_reader_region")
+        override val requiresMemoryManagementPerElement: Boolean = true
+        override val LproduceElement: CodeLabel = cb.emb.defineAndImplementLabel { cb =>
+          val hasNext = iter.invoke[Boolean]("hasNext")
+          cb.ifx(hasNext, {
+            val gLine = iter.invoke[GenericLine]("next")
+            cb.assign(line, gLine.invoke[String]("toString"))
+            cb.goto(LproduceElementDone)
+          }, {
+            cb.goto(LendOfStream)
+          })
+
+        }
+        override val element: EmitCode = EmitCode.fromI(cb.emb) { cb =>
+
+          val reqType: TStruct = requestedType.asInstanceOf[TStruct]
+
+          IEmitCode.present(cb, SStackStruct.constructFromArgs(cb, elementRegion, reqType,
+            EmitCode.fromI(cb.emb)(cb => IEmitCode.present(cb, SJavaString.construct(line))),
+            EmitCode.fromI(cb.emb)(cb => IEmitCode.present(cb, SJavaString.construct(fileName)))))
+        }
+
+        override def close(cb: EmitCodeBuilder): Unit = {
+          cb += iter.invoke[Unit]("close")
+        }
+      })
+    }
+  }
+
+  def toJValue: JValue = ???
+}
+
+
 class StringTableReader(
       val params: StringTableReaderParameters ,
       fileStatuses: IndexedSeq[FileStatus]
@@ -45,11 +118,25 @@ class StringTableReader(
 
   override def pathsUsed: Seq[String] = params.files
 
-  override def lower(ctx: ExecuteContext, requestedType: TableType): TableStage =
-    executeGeneric(ctx).toTableStage(ctx, requestedType)
+  override def lower(ctx: ExecuteContext, requestedType: TableType): TableStage = {
+    val fs = ctx.fs
+    val lines = GenericLines.read(fs, fileStatuses,
+      None, None, params.minPartitions, false, true)
 
-  override def apply(tr: TableRead, ctx: ExecuteContext): TableValue =
-    executeGeneric(ctx).toTableValue(ctx, tr.typ)
+
+    TableStage(globals = MakeStruct(FastSeq()),
+      partitioner = RVDPartitioner.unkeyed(lines.nPartitions),
+      dependency = TableStageDependency.none,
+      contexts = Literal.coerce(TArray(lines.contextType), lines.contexts),
+      body = { partitionContext: Ref => ReadPartition(partitionContext, requestedType.rowType, StringTablePartitionReader(lines))
+      }
+    )
+  }
+
+  override def apply(tr: TableRead, ctx: ExecuteContext): TableValue = {
+
+    // will be implemtned as lower(ctx, tr.typ).toTableValue(...)
+  }
 
   override def partitionCounts: Option[IndexedSeq[Long]] = None
 

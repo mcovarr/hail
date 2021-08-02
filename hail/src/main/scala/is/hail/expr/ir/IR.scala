@@ -676,6 +676,7 @@ abstract class PartitionReader {
 
   def fullRowType: Type
 
+  // should be rowRequiredness(requestedType: Type): TypeWithRequiredness
   def rowPType(requestedType: Type): PType
 
   def emitStream(
