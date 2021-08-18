@@ -1,13 +1,14 @@
 import json
 import os
 import unittest
+
 from unittest import mock
 
 import shutil
 import pytest
 import hail as hl
 from ..helpers import *
-from hail.utils import new_temp_file, FatalError, run_command, uri_path
+from hail.utils import new_temp_file, FatalError, run_command, uri_path, HailUserError
 
 setUpModule = startTestHailContext
 tearDownModule = stopTestHailContext
@@ -2005,8 +2006,7 @@ class ImportLinesTest(unittest.TestCase):
 
 
 class ImportTableTests(unittest.TestCase):
-    @fails_service_backend()
-    @fails_local_backend()
+
     def test_import_table_force_bgz(self):
         f = new_temp_file(extension="bgz")
         t = hl.utils.range_table(10, 5)
@@ -2022,7 +2022,7 @@ class ImportTableTests(unittest.TestCase):
         assert tables.count() == 346
 
     def test_type_imputation(self):
-        ht = hl.import_table(resource('type_imputation.tsv'), delimiter=r' ', missing='.', impute=True)
+        ht = hl.import_table(resource('type_imputation.tsv'), delimiter=' ', missing='.', impute=True)
         assert ht.row.dtype == hl.dtype('struct{1:int32,2:float64,3:str,4:str,5:str,6:bool,7:str}')
 
         ht = hl.import_table(resource('variantAnnotations.tsv'), impute=True)
@@ -2097,11 +2097,11 @@ class ImportTableTests(unittest.TestCase):
 
     @fails_service_backend()
     def test_error_with_context(self):
-        with pytest.raises(FatalError, match='offending line'):
+        with pytest.raises(FatalError, match='For input string:'):
             ht = hl.import_table(resource('tsv_errors.tsv'), types={'col1': 'int32'})
             ht._force_count()
 
-        with pytest.raises(FatalError, match='offending line'):
+        with pytest.raises(HailUserError, match='Expected 2 fields, found 1 field'):
             ht = hl.import_table(resource('tsv_errors.tsv'), impute=True)
 
 
