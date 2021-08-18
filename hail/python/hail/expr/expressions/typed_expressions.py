@@ -2723,9 +2723,6 @@ class StringExpression(Expression):
 
     @typecheck_method(delim=expr_str, quote=expr_str)
     def _split_quoted(self, delim, quote):
-        if quote is None:
-            return self._method("splitQuoted", tarray(tstr), delim)
-        else:
             return self._method("splitQuoted", tarray(tstr), delim, quote)
 
     def lower(self):
@@ -2923,8 +2920,15 @@ class StringExpression(Expression):
         >>> hl.eval(string.matches('12'))
         True
 
+        The `regex` parameter needs to match the entire string if `full_match` is ``True``:
+
         >>> hl.eval(string.matches('12'), True)
         False
+
+   >>> string = hl.literal('3412878')
+
+        >>> hl.eval(string.matches('^[0-9]*$'))
+        True
 
         Regex motifs can be used to match sequences of characters:
 
@@ -2932,8 +2936,6 @@ class StringExpression(Expression):
         True
 
         >>> string = hl.literal('3412878')
-
-        The `regex` parameter needs to match the entire string if `full_match` is ``True``:
 
         >>> hl.eval(string.matches('^[0-9]*$'))
         True
