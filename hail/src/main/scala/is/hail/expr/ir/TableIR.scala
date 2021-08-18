@@ -103,7 +103,6 @@ object TableReader {
   def fromJValue(fs: FS, jv: JValue): TableReader = {
     (jv \ "name").extract[String] match {
       case "TableNativeReader" => TableNativeReader.fromJValue(fs, jv)
-      case "TextTableReader" => TextTableReader.fromJValue(fs, jv)
       case "TableFromBlockMatrixNativeReader" => TableFromBlockMatrixNativeReader.fromJValue(fs, jv)
       case "StringTableReader" => StringTableReader.fromJValue(fs, jv)
       case _ => jv.extract[TableReader]
