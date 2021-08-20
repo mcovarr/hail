@@ -104,7 +104,7 @@ class SJavaArrayStringSettable(
       val iv = cb.newLocal("pcindval_i", i)
       IEmitCode(cb,
         isElementMissing(iv),
-        new SJavaStringCode(array(i)))
+        new SJavaStringCode(array(iv)))
     }
   }
 
